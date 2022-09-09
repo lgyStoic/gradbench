@@ -20,3 +20,50 @@ void ComputeHessianFloat(
         float &A11,
         float &A12,
         float &A22);
+
+void ComputeHessianFloatAOS(
+        const cv::Mat &dxyPatch,
+        float &A11,
+        float &A12,
+        float &A22);
+
+bool ComputeSSD(
+        const cv::Mat &prevPatch,
+        const cv::Mat &nextImg,
+        const cv::Point2f &nextPt,
+        const int winSz,
+        long &cost);
+
+bool ComputeSSDSIMD(
+        const cv::Mat &prevPatch,
+        const cv::Mat &nextImg,
+        const cv::Point2f &nextPt,
+        const int winSz,
+        float &cost);
+
+bool ComputeResiduals(
+        const cv::Mat &prevPatch,
+        const cv::Mat &prevDxPatch,
+        const cv::Mat &prevDyPatch,
+        const cv::Mat &nextImg,
+        const cv::Point2f &nextPt,
+        float &b1,
+        float &b2,
+        int winSz);
+        
+bool ComputeResidualsSIMD(
+        const cv::Mat &prevPatch,
+        const cv::Mat &prevDxPatch,
+        const cv::Mat &prevDyPatch,
+        const cv::Mat &nextImg,
+        const cv::Point2f &nextPt,
+        float &b1,
+        float &b2,
+        int winSz);
+        
+
+void CopyToPatch(
+        cv::Mat &prevPatch,
+        const cv::Mat &nextImg,
+        const cv::Point2f &nextPt,
+        const int winSz);
