@@ -308,82 +308,83 @@ bool ComputeResidualsSIMD(
         iCornerY < 0 || iCornerY + winSz >= nextImg.rows) {
         return false;
     }
-
     float a = corner.x - iCornerX;
     float b = corner.y - iCornerY;
-    float16_t fw00 = cvRound((1.f - a)*(1.f - b));
-    float16_t fw01 = cvRound(a*(1.f - b));
-    float16_t fw10 = cvRound((1.f - a)*b);
-    float16_t fw11 = 1 - fw00 - fw01 - fw10;
+    int iw00 = cvRound((1.f - a)*(1.f - b)*(1 << W_BITS));
+    int iw01 = cvRound(a*(1.f - b)*(1 << W_BITS));
+    int iw10 = cvRound((1.f - a)*b*(1 << W_BITS));
+    int iw11 = (1 << W_BITS) - iw00 - iw01 - iw10;
+    int32x4_t iw00_4s32 = vdupq_n_s32(iw00);
+    int32x4_t iw01_4s32 = vdupq_n_s32(iw01);
+    int32x4_t iw10_4s32 = vdupq_n_s32(iw10);
+    int32x4_t iw11_4s32 = vdupq_n_s32(iw11);
     
-    float16x8_t fw00_x8 = vdupq_n_f16(fw00);
-    float16x8_t fw01_x8 = vdupq_n_f16(fw01);
-    float16x8_t fw10_x8 = vdupq_n_f16(fw10);
-    float16x8_t fw11_x8 = vdupq_n_f16(fw11);
-
-    float32x4_t b1_f4 = vdupq_n_f32(0.0);
-    float32x4_t b2_f4 = vdupq_n_f32(0.0);
+    float32x4_t b1_4f32 = vdupq_n_f32(0.0);
+    float32x4_t b2_4f32 = vdupq_n_f32(0.0);
+    int32x4_t c_4s32 = vdupq_n_s32(1 << 8);
     for(int y = 0; y < winSz; y++)
     {
         auto* patchPtr = prevPatch.ptr<deriv_type>(y, 0);
-        auto* dxPatchPtr = prevDxPatch.ptr<deriv_type>(y, 0);
-        auto* dyPatchPtr = prevDyPatch.ptr<deriv_type>(y, 0);
         auto* next_ptr = nextImg.ptr<uchar>(y+iCornerY, iCornerX);
-        int x = 0;
-        for(; x <= winSz - 16; x += 16)
-        {
-            float16x8_t patch_f8 =  vcvtq_f16_s16(vshrq_n_s16(vld1q_s16(patchPtr + x), 5));
-            float16x8_t patch_a8_f8 = vcvtq_f16_s16(vshrq_n_s16(vld1q_s16(patchPtr + 8 + x), 5));
-
-            uint8x16_t next_00x16 = vld1q_u8(next_ptr + x);
-            uint8x16_t next_01x16 = vld1q_u8(next_ptr + x + 1);
-            uint8x16_t next_10x16 = vld1q_u8(next_ptr + x + winSz);
-            uint8x16_t next_11x16 = vld1q_u8(next_ptr + x + winSz + 1);
-
-            float16x8_t patchDx_f8 = vcvtq_f16_s16(vshrq_n_s16(vld1q_s16(dxPatchPtr + x), 5));
-            float16x8_t patchDy_f8 = vcvtq_f16_s16(vshrq_n_s16(vld1q_s16(dyPatchPtr + x), 5));
-
-            float16x8_t next_00_lowf8 = vcvtq_f16_u16(vmovl_u8(vget_low_u8(next_00x16)));
-            float16x8_t next_01_lowf8 = vcvtq_f16_u16(vmovl_u8(vget_low_u8(next_01x16)));
-            float16x8_t next_10_lowf8 = vcvtq_f16_u16(vmovl_u8(vget_low_u8(next_10x16)));
-            float16x8_t next_11_lowf8 = vcvtq_f16_u16(vmovl_u8(vget_low_u8(next_11x16)));
-
-            float16x8_t interp0001_lowf8 = vaddq_f16(vmulq_f16(fw00_x8, next_00_lowf8), vmulq_f16(fw01_x8, next_01_lowf8));
-            float16x8_t interp1011_lowf8 = vaddq_f16(vmulq_f16(fw10_x8, next_10_lowf8), vmulq_f16(fw11_x8, next_11_lowf8));
-            float16x8_t interpNext_lowf8 = vaddq_f16(interp0001_lowf8, interp1011_lowf8);
-
-            float16x8_t diff_lowf8 = vsubq_f16(interpNext_lowf8, patch_f8);
+        auto* patchDxPtr = prevDxPatch.ptr<deriv_type>(y, 0);
+        auto* patchDyPtr = prevDyPatch.ptr<deriv_type>(y, 0);
+        
+        for(int x = 0; x <= winSz - 8; x += 8) {
             
-            float32x4_t dxbxdiff4 = vaddq_f32(vmulq_f32(vcvt_f32_f16(vget_low_f16(patchDx_f8)), vcvt_f32_f16(vget_low_f16(diff_lowf8))), vmulq_f32(vcvt_f32_f16(vget_high_f16(patchDx_f8)), vcvt_f32_f16(vget_high_f16(diff_lowf8))));
-            float32x4_t dybxdiff4 = vaddq_f32(vmulq_f32(vcvt_f32_f16(vget_low_f16(patchDy_f8)), vcvt_f32_f16(vget_low_f16(diff_lowf8))), vmulq_f32(vcvt_f32_f16(vget_high_f16(patchDy_f8)), vcvt_f32_f16(vget_high_f16(diff_lowf8))));
+            
+            int16x8_t patch_8s16 =  vld1q_s16(patchPtr + x);
+            int16x8_t patchdx_8s16 = vld1q_s16(patchDxPtr + x);
+            int16x8_t patchdy_8s16 = vld1q_s16(patchDyPtr + x);
 
-            float16x8_t patchDxa8_f8 = vcvtq_f16_s16(vshrq_n_s16(vld1q_s16(dxPatchPtr + x + 8), 5));
-            float16x8_t patchDya8_f8 = vcvtq_f16_s16(vshrq_n_s16(vld1q_s16(dyPatchPtr + x + 8), 5));
-
-            float16x8_t next_00_highf8 = vcvtq_f16_s16(vmovl_s8(vget_high_s8(next_00x16)));
-            float16x8_t next_01_highf8 = vcvtq_f16_s16(vmovl_s8(vget_high_s8(next_01x16)));
-            float16x8_t next_10_highf8 = vcvtq_f16_s16(vmovl_s8(vget_high_s8(next_10x16)));
-            float16x8_t next_11_highf8 = vcvtq_f16_s16(vmovl_s8(vget_high_s8(next_11x16)));
-
-            float16x8_t interp0001_highf8 = vaddq_f16(vmulq_f16(fw00_x8, next_00_highf8), vmulq_f16(fw01_x8, next_01_highf8));
-            float16x8_t interp1011_highf8 = vaddq_f16(vmulq_f16(fw10_x8, next_10_highf8), vmulq_f16(fw11_x8, next_11_highf8));
-            float16x8_t interpNext_highf8 = vaddq_f16(interp0001_highf8, interp1011_highf8);
-
-            float16x8_t diff_highf8 = vsubq_f16(interpNext_highf8, patch_f8);
-            b1_f4 = vaddq_f32(dxbxdiff4, vaddq_f32(vmulq_f32(vcvt_f32_f16(vget_low_f16(patchDxa8_f8)), vcvt_f32_f16(vget_low_f16(diff_highf8))), vmulq_f32(vcvt_f32_f16(vget_high_f16(patchDxa8_f8)), vcvt_f32_f16(vget_high_f16(diff_highf8)))));
-            b2_f4 = vaddq_f32(dybxdiff4, vaddq_f32(vmulq_f32(vcvt_f32_f16(vget_low_f16(patchDya8_f8)), vcvt_f32_f16(vget_low_f16(diff_highf8))), vmulq_f32(vcvt_f32_f16(vget_high_f16(patchDya8_f8)), vcvt_f32_f16(vget_high_f16(diff_highf8)))));
+            int16x8_t next_00_16s8 = vreinterpretq_s16_u16(vmovl_u8(vld1_u8(next_ptr + x)));
+            int16x8_t next_01_16s8 = vreinterpretq_s16_u16(vmovl_u8(vld1_u8(next_ptr + x + 1)));
+            int16x8_t next_10_16s8 = vreinterpretq_s16_u16(vmovl_u8(vld1_u8(next_ptr + x + nextImg.cols)));
+            int16x8_t next_11_16s8 = vreinterpretq_s16_u16(vmovl_u8(vld1_u8(next_ptr + x + nextImg.cols + 1)));
+            
+            int32x4_t x00h_4s32 = vmulq_s32(vmovl_s16(vget_high_s16(next_00_16s8)),  iw00_4s32);
+            int32x4_t x01h_4s32 = vmulq_s32(vmovl_s16(vget_high_s16(next_01_16s8)),  iw01_4s32);
+            
+            int32x4_t x10h_4s32 = vmlaq_s32(x00h_4s32, vmovl_s16(vget_high_s16(next_10_16s8)),  iw10_4s32);
+            int32x4_t x11h_4s32 = vmlaq_s32(x01h_4s32, vmovl_s16(vget_high_s16(next_11_16s8)),  iw11_4s32);
+            
+            
+            int32x4_t hinterp_4s32 = vshrq_n_s32(vaddq_s32(vaddq_s32(x10h_4s32, x11h_4s32), c_4s32), 9);
+            
+            int32x4_t patch_h4s32 = vmovl_s16(vget_high_s16(patch_8s16));
+            
+            float32x4_t diff_h4f32 = vcvtq_f32_s32(vsubq_s32(hinterp_4s32, patch_h4s32));
+            
+            
+            float32x4_t patchdxh_4f32 = vcvtq_f32_s32(vmovl_s16(vget_high_s16(patchdx_8s16)));
+            b1_4f32 = vmlaq_f32(b1_4f32, patchdxh_4f32, diff_h4f32);
+            
+            float32x4_t patchdyh_4f32 = vcvtq_f32_s32(vmovl_s16(vget_high_s16(patchdy_8s16)));
+            b2_4f32 = vmlaq_f32(b2_4f32, patchdyh_4f32, diff_h4f32);
+            
+            int32x4_t x00l_4s32 = vmulq_s32(vmovl_s16(vget_low_s16(next_00_16s8)),  iw00_4s32);
+            int32x4_t x01l_4s32 = vmulq_s32(vmovl_s16(vget_low_s16(next_01_16s8)),  iw01_4s32);
+            int32x4_t x10l_4s32 = vmlaq_s32(x00l_4s32, vmovl_s16(vget_low_s16(next_10_16s8)),  iw10_4s32);
+            int32x4_t x11l_4s32 = vmlaq_s32(x01l_4s32, vmovl_s16(vget_low_s16(next_11_16s8)),  iw11_4s32);
+            
+            int32x4_t linterp_4s32 = vshrq_n_s32(vaddq_s32(vaddq_s32(x10l_4s32, x11l_4s32), c_4s32), 9);
+            int32x4_t patch_l4s32 = vmovl_s16(vget_low_s16(patch_8s16));
+            
+            float32x4_t diff_l4f32 = vcvtq_f32_s32(vsubq_s32(linterp_4s32, patch_l4s32));
+            
+            
+            float32x4_t patchdxl_4f32 = vcvtq_f32_s32(vmovl_s16(vget_low_s16(patchdx_8s16)));
+            b1_4f32 = vmlaq_f32(b1_4f32, patchdxl_4f32, diff_l4f32);
+            
+            float32x4_t patchdyl_4f32 = vcvtq_f32_s32(vmovl_s16(vget_low_s16(patchdy_8s16)));
+            b2_4f32 = vmlaq_f32(b2_4f32, patchdyl_4f32, diff_l4f32);
         }
-
-        for(; x < winSz; x++){           
-            float diff = next_ptr[x]*fw00 + next_ptr[x+1]*fw01 + next_ptr[x]*fw10 +
-                                  next_ptr[x+1]*fw11 - (patchPtr[x]>>5);
-            b1 += diff * dxPatchPtr[x];     // real_b1 * (2^10)
-            b2 += diff * dyPatchPtr[x];
-        }
-
-        b1 += vget_lane_f32(vadd_f32(vget_high_f32(b1_f4), vget_low_f32(b1_f4)), 0);
-        b2 += vget_lane_f32(vadd_f32(vget_high_f32(b2_f4), vget_low_f32(b2_f4)), 0);
     }
+    
+    float32x2_t b1_2f32 = vadd_f32(vget_high_f32(b1_4f32), vget_low_f32(b1_4f32));
+    b1 = vget_lane_f32(vpadd_f32(b1_2f32, b1_2f32), 0);
+    
+    float32x2_t b2_2f32 = vadd_f32(vget_high_f32(b2_4f32), vget_low_f32(b2_4f32));
+    b2 = vget_lane_f32(vpadd_f32(b2_2f32, b2_2f32), 0);
     return true;
 }
 

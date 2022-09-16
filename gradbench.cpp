@@ -63,9 +63,22 @@ static void BM_ComputeHessian(benchmark::State& state) {
 
 static void BM_ComputeHessianSIMD(benchmark::State& state) {
     int winSz = 16;
-    cv::Mat patch(winSz, winSz, CV_16SC1);
-    cv::Mat patchDx(winSz, winSz, CV_16SC1);
-    cv::Mat patchDy(winSz, winSz, CV_16SC1);
+    
+    
+    
+    cv::AutoBuffer<uchar> patchBuf(winSz * winSz * 2 + 64);
+    auto patchPtr = cv::alignPtr(patchBuf.data(),  64);
+    cv::Mat patch(winSz, winSz, CV_16SC1, patchPtr);
+
+    cv::AutoBuffer<uchar> patchDxBuf(winSz * winSz * 2 + 64);
+    auto patchDxPtr = cv::alignPtr(patchDxBuf.data(),  64);
+    cv::Mat patchDx(winSz, winSz, CV_16SC1, patchDxPtr);
+
+    cv::AutoBuffer<uchar> patchDyBuf(winSz * winSz * 2 + 64);
+    auto patchDyPtr = cv::alignPtr(patchDyBuf.data(),  64);
+    cv::Mat patchDy(winSz, winSz, CV_16SC1, patchDxPtr);
+    std::cout << (uint64_t)patchDxPtr << std::endl;
+    std::cout << (uint64_t)patchDyPtr << std::endl;
     for(auto _ :state) {
         state.PauseTiming(); 
         DoSetup(patch);
